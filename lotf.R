@@ -15,7 +15,7 @@ readLOTF <- function(filename) {
 ## reads section of lf3.etx, loading entire thing into RAM takes too long
 readETX <- function(beg, end) {
   fname <- "data/lf3.etx"
-  if (!file.exists(fname)) unzip("data.zip", fname, exdir = "data")
+  if (!file.exists(fname)) unzip("data.zip", "lf3.etx", exdir = "data")
   scan(file = fname, what = "character", skip = beg, nlines = end - beg, encoding = "latin1")
 }
 
@@ -164,7 +164,7 @@ getTOC <- function(text) {
 }
 
 ## deletes all location markers
-htmlify <- function(text) {
+htmlify <- function(text, createTOC = T) {
   nav <- getTOC(text)
   toc <- NA
   
@@ -177,7 +177,9 @@ htmlify <- function(text) {
       html[toc$n2] <- paste0("<a name = \"", toc$location, "\" class=\"chapter\">", html[toc$n2], "</a>")
       
       # append TOC
-      html <- c(tocHTML, html)
+      if (createTOC) {
+        html <- c(tocHTML, html)
+      }
     }
   } else {
     html <- text
@@ -194,7 +196,7 @@ htmlify <- function(text) {
 
 ## super-secret encryption key
 decodeChar <- function(x) {
-  intX <- utf8ToInt(x) #iconv(x, "latin1", "utf-8"))
+  intX <- utf8ToInt(iconv(x, "latin1", "utf-8")) # utf8ToInt(x)
   if (intX > 122) {
     intX <- intX - 121
     intToUtf8(intX)
@@ -212,4 +214,29 @@ getLimits <- function() {
     names(s) <- NULL
     s <- s / 78 ## why?
     s
+}
+
+## format file name as #-author-title.html
+formatFilename <- function(n) {
+  ta <- getTitleAuthor()
+  title <- gsub("( )+","_",gsub("[[:punct:]]", "", ta[n,"title"]))
+  author<- gsub("( )+","_",gsub("[[:punct:]]", "", ta[n,"author"]))
+  fname <- sprintf("%04d-%s-%s.html", n, author, title)
+  fname
+}
+
+## write book to html file
+writeHTML <- function(n, fname) {
+  text <- getText(n)
+  html <- htmlify(text, createTOC = F)
+  writeLines(html, fname)
+}
+
+## write all books to html
+writeAll <- function() {
+  fname <- formatFilename(1:1770)
+  for (i in 1:1770) {
+    print(fname[i])
+    writeHTML(i, fname[i])
+  }
 }
