@@ -2,10 +2,12 @@
 ## string utilities
 trim <- function (x) gsub("^\\s+|\\s+$", "", x)
 escape <- function(x) gsub("([.|()\\^{}+$*?]|\\[|\\])", "\\\\\\1", x)
+left <- function(str, x) substring(str, 1, x)
+right <- function(str, x) left(paste0(rev(strsplit(str,split = "")[[1]]), collapse=""), x)
 
 ## returns file contents without unzipping data directory
 readLOTF <- function(filename) {
-    
+  
   con <- unz("data.zip", filename)
   contents <- readLines(con)
   close(con)
@@ -27,18 +29,18 @@ readLF3 <- function(beg, end) {
 
 ## merge aut/ftf for list of titles by author, with ids
 getTitleAuthor <- function() {
-    author <- readLOTF("lf3.aut") ## author file, alphabetical
-    titles <- readLOTF("lf3.ftf") ## title file
-    id <- readLOTF("lf3.id") ## metadata file
-    
-    ## authornbr <- sapply(titles, function(x) as.numeric(substr(x,1,3))) ## extract author number
-    authornbr <- as.numeric(substr(titles,1,3))+1
-    titles <- as.data.frame(cbind(substr(titles,5,100), authornbr, author[authornbr], id))
-    names(titles) <- c("title", "authornbr", "author", "meta")
-    
-    titles$title <- trim(titles$title)
-    titles$author <- trim(titles$author)
-    titles
+  author <- readLOTF("lf3.aut") ## author file, alphabetical
+  titles <- readLOTF("lf3.ftf") ## title file
+  id <- readLOTF("lf3.id") ## metadata file
+  
+  ## authornbr <- sapply(titles, function(x) as.numeric(substr(x,1,3))) ## extract author number
+  authornbr <- as.numeric(substr(titles,1,3))+1
+  titles <- as.data.frame(cbind(substr(titles,5,100), authornbr, author[authornbr], id))
+  names(titles) <- c("title", "authornbr", "author", "meta")
+  
+  titles$title <- trim(titles$title)
+  titles$author <- trim(titles$author)
+  titles
 }
 
 ## just get authors
@@ -72,7 +74,7 @@ getText <- function(n = NA, title = NA, author = NA) {
   if (!is.na(n)) {
     print(n)
     lim <- getLimits()
-  
+    
     beg <- lim[n]
     end <- lim[n+1]
     if (file.exists("lf3.txt")) {
@@ -88,26 +90,6 @@ getText <- function(n = NA, title = NA, author = NA) {
   text
 }
 
-## builds key from Yeats' poem
-yeats <- function(data) {
-    ## hardcoded 12 lines of yeats' text
-    ciph <- data[matrix(3581134 + outer(1:4,5*0:2,'+'), ncol=1)[,1]]
-    ciph <- sapply(1:12, function(x) regmatches(ciph[x], regexec("\037,(.*)\037[0-9;]", ciph[x]))[[1]][2])
-    ciph <- lapply(ciph, function(x) strsplit(x, split="")[[1]])
-    
-    plain <- readLines("1770.txt")
-    plain <- lapply(plain, function(x) strsplit(x, split="")[[1]])
-    
-    key <- lapply(1:12, function(x) cbind(plain[[x]], ciph[[x]]))
-    d <- as.data.frame(key[[1]], stringsAsFactors = FALSE)
-    for (i in 2:12) d <- rbind(d, as.data.frame(key[[i]], stringsAsFactors = FALSE))
-    names(d) <- c("plain", "cipher")
-    d <- unique(d[order(d[,2],d[,1]),])
-    d <- d[d$plain != d$cipher,]
-    
-    d
-}
-
 ## decodes text based on super-secret encryption key
 decode <- function(text) {
   ## loop through lines
@@ -117,17 +99,17 @@ decode <- function(text) {
     line <- gsub("\037.","\037", line) # begin paragraph
     plain <- if (line == "") {
       ""
-      } else {
-        sapply(strsplit(line, split="")[[1]], decodeChar)
-      }
+    } else {
+      sapply(strsplit(line, split="")[[1]], decodeChar)
+    }
     line <- paste0(plain, collapse = "")
     # line <- gsub("^\\{.*\\}$", "", line) # delete lines of the form {chapter, verse, etc}
     # wild[grep("^\\{(([A-Z0-9_])* )?\\^([a-z])* ([0-9])*\\}$",wild)]
     line <- gsub("\035", "<i>", line) #italics
     line <- gsub("\036", "</i>", line)
-    line <- gsub("^\037","<p>", line) # begin paragraph
-    line <- gsub("\037","&nbsp;&nbsp;&nbsp;&nbsp;", line) # begin paragraph
-    line <- gsub("^-","<br><br>", line) # begin paragraph
+    line <- gsub("^\037","<br>", line) # begin paragraph: don't use <p> as cipher contains no close tag symbol
+    line <- gsub("\037","&nbsp;&nbsp;&nbsp;&nbsp;", line) # tabspace?
+    line <- gsub("^-","<br>", line) # blank line
     text[i] <- line
   }
   
@@ -136,7 +118,7 @@ decode <- function(text) {
 
 ## extracts {bracketed} TOC information
 getTOC <- function(text) {
-  skeleton <- "^<p>\\{([^a-z\\^]*)\\^([a-z]*) ([0-9]*)\\}$"
+  skeleton <- "^<br>\\{([^a-z\\^]*)\\^([a-z]*) ([0-9]*)\\}$"
   bMatch <- grepl(skeleton, text)
   nMatch <- grep(skeleton, text)
   cMatch <- text[bMatch]
@@ -151,8 +133,12 @@ getTOC <- function(text) {
     
     toc <- unique(nav[,c("location")])
     if (length(toc) > 1) {
-      toc <- data.frame(toc, n = sapply(1:length(toc), function(x) min(grep(paste0("(<p>)?",toc[x]), text))))
-      toc$expression <- paste0(gsub("\\|", ",",gsub("\\_"," ",toc$toc)), ": ", gsub("<p>","",text[toc$n+1]))
+      toc <- data.frame(toc, n = sapply(1:length(toc), function(x) {
+        expr <- escape(toc[x])
+        expr <- paste0("(<br>)?", expr)
+        min(grep(expr, text))
+      }))
+      toc$expression <- paste0(gsub("\\|", ",",gsub("\\_"," ",toc$toc)), ": ", gsub("<br>","",text[toc$n+1]))
       df <- data.frame(expression = toc$expression, location = toc$toc, block = rep(block, nrow(toc)), cursor = rep(0, nrow(toc)), n = toc$n)
       nav <- rbind(nav, df)
       nav <- nav[order(nav$n),]
@@ -174,7 +160,8 @@ htmlify <- function(text, createTOC = T) {
       toc <- nav[nav$cursor == 0, c("expression", "location","n2")]
       tocHTML <- paste0("<a href=\"#",toc$location,"\">",toc$expression,"</a>")
       # chapter markers
-      html[toc$n2] <- paste0("<a name = \"", toc$location, "\" class=\"chapter\">", html[toc$n2], "</a>")
+      html[toc$n2] <- gsub("<br>","",html[toc$n2])
+      html[toc$n2] <- paste0("<br><a name = \"", toc$location, "\" class=\"chapter\">", html[toc$n2], "</a>")
       
       # append TOC
       if (createTOC) {
@@ -188,15 +175,30 @@ htmlify <- function(text, createTOC = T) {
   html <- html[!grepl("\u0085[iI]", html)]
   html <- html[!grepl("\\{", html)]
   html <- html[!grepl("\\}", html)]
-  html <- html[!grepl("\\_", html)]
+  html <- html[grepl("[a-z]", html) | !grepl("[\\_]", html)]
   
   html <- gsub("\u0085\u0080(.*)\\.(cif|CIF)\u0085\u0080", "<p><img src=\"jpg/\\1\\.jpg\"/></p>", html)
+  
+  # convert <br> to <p>
+  html <- paste0(html, collapse = " ")
+  html <- gsub("<br>", "</p><break><p>", html)
+  html <- strsplit(html, split = "<break>")[[1]]
+  closed <- grepl("^<p>(.*)</p>$", html)
+  leading <- grepl("^<p>(.*)$", html)
+  trailing <- grepl("^(.*)</p>$", html)
+  html[leading & !closed] <- paste0(html[leading & !closed], "</p>", collapse = "")
+  html[trailing & !closed] <- paste0("<p>", html[trailing & !closed], collapse = "")
+  html <- gsub(" </p>", "</p>", html)
+  
+  html <- gsub("<p>", "<div>", html)
+  html <- gsub("</p>", "</div>", html)
+  
   html
 }
 
 ## super-secret encryption key
 decodeChar <- function(x) {
-  intX <- utf8ToInt(iconv(x, "latin1", "utf-8")) # utf8ToInt(x)
+  intX <- utf8ToInt(x) # utf8ToInt(iconv(x, "latin1", "utf-8")) # 
   if (intX > 122) {
     intX <- intX - 121
     intToUtf8(intX)
@@ -209,34 +211,74 @@ decodeChar <- function(x) {
 
 ## returns title breaks, limits
 getLimits <- function() {
-    lim <- readLOTF("lf3.lim") ## limit file
-    s <- sapply(lim, function(x) as.numeric(substr(x,1,10)))
-    names(s) <- NULL
-    s <- s / 78 ## why?
-    s
-}
-
-## format file name as #-author-title.html
-formatFilename <- function(n) {
-  ta <- getTitleAuthor()
-  title <- gsub("( )+","_",gsub("[[:punct:]]", "", ta[n,"title"]))
-  author<- gsub("( )+","_",gsub("[[:punct:]]", "", ta[n,"author"]))
-  fname <- sprintf("%04d-%s-%s.html", n, author, title)
-  fname
+  lim <- readLOTF("lf3.lim") ## limit file
+  s <- sapply(lim, function(x) as.numeric(substr(x,1,10)))
+  names(s) <- NULL
+  s <- s / 78 ## why?
+  s
 }
 
 ## write book to html file
-writeHTML <- function(n, fname) {
+writeHTML <- function(n, ta) {
+  # fetch, decode & htmlify text
   text <- getText(n)
   html <- htmlify(text, createTOC = F)
-  writeLines(html, fname)
+  
+  # format file name
+  title <- gsub("( )+","_",gsub("[[:punct:]]", "", ta[n,"title"]))
+  author<- gsub("( )+","_",gsub("[[:punct:]]", "", ta[n,"author"]))
+  
+#   # if work contains chapters, write to single file
+#   if (sum(grepl("class=\"chapter\">", html)) > 0) {
+#     fname <- sprintf("html/%s-%s.html", author, title)
+#   } else {
+#     # combine all chapter-less works into single "collected works" file
+#     first_line <- sprintf("<br><a name=\"%s\" class=\"chapter\">%s</a>", title, ta[n,"title"])
+#     html <- c(first_line, html)
+#     fname <- sprintf("html/%s-Collected_Works.html", author)
+#   }
+  
+  fname <- sprintf("html/%s-%s.html", author, title)
+  
+  # write lines
+  print(fname)
+  f = file(fname, "a")
+  writeLines(html, f)
+  close(f)
 }
 
 ## write all books to html
 writeAll <- function() {
-  fname <- formatFilename(1:1770)
-  for (i in 1:1770) {
-    print(fname[i])
-    writeHTML(i, fname[i])
+  ta <- getTitleAuthor()
+  for (i in 1:nrow(ta)) {
+    writeHTML(i, ta)
+  }
+  
+  # now convert them all to ebooks
+  flist <- list.files("html", "*.html", full.names = T)
+  iMatch <- regexec("^html/(.*)\\-(.*)\\.html$", flist)
+  rMatch <- regmatches(flist, iMatch)
+  df <- data.frame(t(sapply(rMatch, c)), stringsAsFactors = F)
+  names(df) <- c("htmlname","author","title")
+  df$epubname <- gsub("html","epub",df$htmlname)
+  df$title <- gsub("_"," ",df$title)
+  df$author <- sapply(df$author, function(x) {
+    ttl <- strsplit(x, "_")[[1]]
+    if (length(ttl) > 1) {
+      ttl <- c(ttl[2:length(ttl)], ttl[1])
+      ttl <- paste(ttl, collapse=" ")
+    }
+    ttl
+  })
+  
+  # write all html to epub
+  logname <- "write.log"
+  if (file.exists(logname)) {
+    file.remove(logname)
+  }
+  for (i in 1:nrow(df)) {
+    dx <- df[i,]
+    cmd <- sprintf("ebook-convert %s %s --chapter \"//*[@class=\\\"chapter\\\"]\" --authors \"%s\" --title \"%s\" --language en --remove-paragraph-spacing >> %s", dx$htmlname, dx$epubname, dx$author, dx$title, logname)
+    system(cmd)
   }
 }
